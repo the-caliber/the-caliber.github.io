@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title><![CDATA[The Caliber]]></title><description><![CDATA[Thoughts, stories and ideas.]]></description><link>http://localhost:2368/</link><image><url>http://localhost:2368/favicon.png</url><title>The Caliber</title><link>http://localhost:2368/</link></image><generator>Ghost 5.82</generator><lastBuildDate>Thu, 23 May 2024 15:58:53 GMT</lastBuildDate><atom:link href="http://localhost:2368/rss/" rel="self" type="application/rss+xml"/><ttl>60</ttl><item><title><![CDATA[A look into transient storage’s possible security and coding mistakes.]]></title><description><![CDATA[<figure class="kg-card kg-image-card"><img src="http://localhost:2368/content/images/2024/05/unnamed-2.png" class="kg-image" alt loading="lazy" width="512" height="512"></figure><p><strong>Table of contents:</strong><br>1. What is&#xA0;<strong>Transient storage&#xA0;</strong>(in short)<br>2. Applications of transient storage (in short)<br>3. Usage with examples<br>4. Security considerations</p><hr><h3 id="what-is-transient-storage-in-short"><strong>What is&#xA0;Transient storage (in short)&#xA0;:</strong></h3><p>The&#xA0;<strong>Transient storage&#xA0;</strong>is the dedicated data location in EVM that behaves like a</p>]]></description><link>http://localhost:2368/a-look-into-transient-storages-possible-security-and-coding-mistakes/</link><guid isPermaLink="false">664e1d13112314489444b184</guid><dc:creator><![CDATA[Caliber]]></dc:creator><pubDate>Thu, 02 May 2024 16:47:00 GMT</pubDate><content:encoded><![CDATA[<figure class="kg-card kg-image-card"><img src="http://localhost:2368/content/images/2024/05/unnamed-2.png" class="kg-image" alt loading="lazy" width="512" height="512"></figure><p><strong>Table of contents:</strong><br>1. What is&#xA0;<strong>Transient storage&#xA0;</strong>(in short)<br>2. Applications of transient storage (in short)<br>3. Usage with examples<br>4. Security considerations</p><hr><h3 id="what-is-transient-storage-in-short"><strong>What is&#xA0;Transient storage (in short)&#xA0;:</strong></h3><p>The&#xA0;<strong>Transient storage&#xA0;</strong>is the dedicated data location in EVM that behaves like a storage but this data location is discarded after each transaction. Transient storage is cheaper than storage.</p><p>Solidity 0.8.24 supports TSTORE and TLOAD opcodes included in the Cancun hardfork which can be used to store and load/access the transient storage.</p><p>For more info about background and motivation please read:<br><a href="https://eips.ethereum.org/EIPS/eip-1153?ref=localhost" rel="noopener ugc nofollow">https://eips.ethereum.org/EIPS/eip-1153</a>&#xA0;and&#xA0;<a href="https://soliditylang.org/blog/2024/01/26/transient-storage/?ref=localhost" rel="noopener ugc nofollow">https://soliditylang.org/blog/2024/01/26/transient-storage/</a></p><hr><h3 id="applications-of-transient-storage"><strong>Applications of transient storage:</strong></h3><p>(Some applications/use cases are listed in the eip doc. are:)</p><ol><li>Reentrancy locks (which we will see below)</li><li>On-chain computable CREATE2 addresses: constructor arguments are read from the factory contract instead of passed as part of init code hash</li><li>Single transaction&#xA0;<a href="https://eips.ethereum.org/EIPS/eip-20?ref=localhost" rel="noopener ugc nofollow">ERC-20</a>&#xA0;approvals, e.g.&#xA0;<code>#temporaryApprove(address spender, uint256 amount)</code></li><li>Fee-on-transfer contracts: pay a fee to a token contract to unlock transfers for the duration of a transaction</li><li>&#x201C;Till&#x201D; pattern: allowing users to perform all actions as part of a callback, and checking the &#x201C;till&#x201D; is balanced at the end</li><li>Proxy call metadata: pass additional metadata to an implementation contract without using calldata, e.g. values of immutable proxy constructor arguments</li></ol><p>Additionally, check&#xA0;<a href="https://www.youtube.com/live/xFp8RlRq0qU?feature=shared&amp;ref=localhost" rel="noopener ugc nofollow"><strong>Applications of Transient Storage (EIP-1153)</strong></a><strong>&#xA0;</strong>By Moody<strong>&#xA0;</strong>Salem.</p><hr><h3 id="usage-with-examples"><strong>Usage with examples:</strong></h3><p><strong>Reentrancy lock with storage:</strong></p><pre><code class="language-solidity">contract ReentrancyGuard {
+    bool public entered;
+    mapping(address =&gt; uint) values;
+
+    modifier nonreentrant {
+        require(!entered,&quot;Reentrancy&quot;);
+        entered = true;
+        _;
+        entered = false;
+    }
+
+    receive() external payable{
+        values[msg.sender] = msg.value;
+    }
+
+    function withdraw() nonreentrant public {
+        uint balance = values[msg.sender];
+        (bool success,) = msg.sender.call{value: balance}(&quot;&quot;);
+        require(success);
+        values[msg.sender]=0;
+    }
+}</code></pre><p><strong>Reentrancy lock with transient storage:</strong></p><pre><code class="language-solidity">contract TransientReentrancyGuard {
+    uint256 public theStorageForNoReason = 1 ; // Yes i can still use the storage!
+    mapping(address =&gt; uint) public values;
+
+    modifier nonreentrant {
+        assembly {
+            if tload(0) { revert(0, 0) }
+            tstore(0, 1)
+        }
+        _;
+
+        assembly {
+            tstore(0, 0)
+        }
+    }
+
+    receive() external payable{
+        values[msg.sender] = msg.value;
+    }
+
+    function withdraw() nonreentrant public {
+        uint balance = values[msg.sender];
+        (bool success,) = msg.sender.call{value: balance}(&quot;&quot;);
+        require(success);
+        values[msg.sender]=0;
+    }
+}</code></pre><p>It can be seen from the second example that the values can be stored in transient storage with tstore and the transient storage can be accessed with tload. for more check both&#xA0;<a href="https://www.evm.codes/?ref=localhost#5d?fork=cancun" rel="noopener ugc nofollow">tstore<u>&#xA0;</u></a>and&#xA0;<a href="https://www.evm.codes/?ref=localhost#5c?fork=cancun" rel="noopener ugc nofollow">tload</a>.</p><p>If we deploy both the contracts and call the withdraw function on each to check the gas usage, It can be seen that the one that uses storage, uses more gas than the one that uses transient storage.</p><hr><h3 id="security-considerations"><strong>Security considerations:</strong></h3><p>EIP 1153&#x2019;s security consideration section highlights some interesting considerations that can lead to security risks or can break some functionality if not tested well.</p><p><strong>Not setting the used transient storage slot back to default:</strong></p><blockquote><em>Because transient storage is automatically cleared at the end of the transaction, smart contract developers may be tempted to avoid clearing slots as part of a call in order to save gas. However, this could prevent further interactions with the contract in the same transaction (e.g. in the case of re-entrancy locks) or cause other bugs &#x2014;&#xA0;</em><a href="https://eips.ethereum.org/EIPS/eip-1153?ref=localhost#security-considerations" rel="noopener ugc nofollow">EIP 1153 Doc</a><em>.</em></blockquote><p>Below are some examples that highlight this scenario more practically:</p><ol><li>Not setting the used slot again to default (Reentrancy guard example):</li></ol><pre><code class="language-solidity">contract TransientReentrancyGuardWithOrderExecution {
+        struct Order{
+            uint pendingPayment;
+            address toAddress;
+        }
+        mapping(address =&gt; uint) public values;
+        mapping(address =&gt; Order) public pendingOrder;
+
+        modifier nonReentrant {
+            assembly {
+                if tload(0) { revert(0, 0) }
+                tstore(0, 1)
+            }
+            _;
+
+            // Assumption: the transient storage will be cleared at the end of this call so no tstore(0,0) is needed. And -
+            // if someone reenters to the transaction because the value for 0th slot would be non zero, it would revert.
+        }
+
+        receive() external payable{
+            values[msg.sender] = msg.value;
+        }
+
+        // This function gets called in the batch call.
+        function executeOrder(address _address, bytes32 _addressSignature) nonReentrant public {
+            // Signature check
+            // ...
+
+            uint pendingPayment = pendingOrder[_address].pendingPayment;
+            (bool success,) = pendingOrder[_address].toAddress.call{value: pendingPayment}(&quot;&quot;);
+            require(success);
+            pendingOrder[_address].pendingPayment = 0;
+        }
+}</code></pre><p>TransientReentrancyGuardWithOrderExecution contract overview:<br>The executeOrder() function will be called by anyone with the signature to get the pending payment for the _address entered.</p><p>In the case if toAddress tries to reenter while receiving the pendingPayment to call executeOrder(), the transaction will revert because nonReentrant will check that if tload(0) is non-zero, if yes then it will revert.</p><p>After the first successful transaction, the transient storage will be erased so that for the next transaction to the executeOrder() the nonReentrant modifier will execute normally without reverting as the tload(0) is zero so there&#x2019;s no need to revert.</p><p>In the above example, the assumption is made that it&#x2019;s unnecessary to set the storage again to default because it would eventually be erased at the end of the transaction.</p><p>But this assumption is incorrect in the case when the executeOrder() will be executed in the batch, there would be multiple executeOrder() calls involved in the one transaction. But for the second executeOrder() call the nonReentrant will revert because the tload(0) isn&#x2019;t set to default at the end of the first call.</p><p>This shows how it can break the functionality and create problems.</p><p>2. Not setting the used slot again to default (Order executor example):</p><pre><code class="language-solidity">contract OrderExecutorWithTransientStorage {
+    struct Order{
+        uint[] numberOfTokenTransferredForIds;
+        address from;
+        address to;
+    }
+    event numberOfTokensTransferred( uint);
+    
+    function executeOrder(Order calldata order) public {
+        uint numberOfTokenTransferred;
+
+        for(uint i=0; i&lt;order.numberOfTokenTransferredForIds.length;i++){
+            numberOfTokenTransferred = order.numberOfTokenTransferredForIds[i];
+            assembly {
+                tstore(0,add(tload(0),numberOfTokenTransferred))
+            }
+
+        }
+
+        // Use of numberOfTokenTransferred in important logic.
+        // ...
+
+        assembly {
+            numberOfTokenTransferred := tload(0)
+        }
+
+        // Use of numberOfTokenTransferred in important event.
+        emit numberOfTokensTransferred(numberOfTokenTransferred); 
+
+        // Assumption: the transient storage will be cleared at the end of this call so no tstore(0,0) is needed.
+        // assembly {
+        //     tstore(0, 0)
+        // }
+    }
+}</code></pre><p>OrderExecutorWithTransientStorage contract overview:<br>This sample contract executes order with executeOrder() function. The executeOrder() adds elements from numberOfTokenTransferredForIds array to the transient storage at slot 0. We can notice that the value is not getting assigned but it&apos;s getting added to the previous value. Let&#x2019;s assume that the value stored in transient storage is being used as a part of further function logic and may be stored in transient storage again.</p><p>The value is then loaded and assigned to the numberOfTokenTransferred variable again so that it can be used while emitting the numberOfTokensTransferred event.</p><p>In this example, the same assumption is being made that it&#x2019;s unnecessary to set the storage again to default because it would eventually be erased at the end of the transaction.</p><p>But this assumption is incorrect as the previous one. Let&#x2019;s say the executeOrder() function will be executed in the batch (say 2 times) then because the transient storage value stored in the first call is not yet cleared, In the for loop it will get added to the previously stored value. Which makes the assumption incorrect again.</p><p>The above scenario can create security risks depending on the situation. So in this case for the second batch call, the emitted numberOfTokenTransferred value will be an addition of the previous value plus the one that got calculated in the for loop for this call. And depending on the usage of this value the impact will vary.</p><p><strong>Using transient storage to store mapped values (&#xA0;</strong>similar to<strong>&#xA0;Not setting the used storage slot back to default as&#xA0;</strong>discussed above<strong>):</strong></p><blockquote><em>Smart contract developers may also be tempted to use transient storage as an alternative to in-memory mappings. They should be aware that transient storage is not discarded when a call returns or reverts, as is memory, and should prefer memory for these use cases so as not to create unexpected behavior on reentrancy in the same transaction &#x2014;&#xA0;</em><a href="https://eips.ethereum.org/EIPS/eip-1153?ref=localhost#security-considerations" rel="noopener ugc nofollow">EIP 1153 Doc</a><em>.</em></blockquote><p>The quoted statement highlights a similar thing regarding using transient storage for mapping values without keeping track and without clearing them up which can lead to unexpected behavior in complex transactions.</p><p>So in general it is good practice to clear the transient storage:</p><blockquote><em>We recommend to generally always clear transient storage completely at the end of a call into your smart contract to avoid these kinds of issues and to simplify the analysis of the behaviour of your contract within complex transactions. &#x2014;&#xA0;</em><a href="https://soliditylang.org/blog/2024/01/26/transient-storage/?ref=localhost" rel="noopener ugc nofollow">Solidity lang blogpost</a></blockquote><p>Overall the scenario where the transient storage is not getting cleared before the next call can create security risks when it comes to the usage of the transient state in critical logic where the value stored before will still be accounted for in the new call which can lead to security risks depending on the logic.</p><p><strong>Additionally, it&#x2019;s worth taking a look at Low-gas reentrancy attack&#xA0;</strong><a href="https://chainsecurity.com/tstore-low-gas-reentrancy/?ref=localhost" rel="noopener ugc nofollow"><strong>here&#xA0;</strong></a><strong>and&#xA0;</strong><a href="https://dev-otion.com/en/entry/what-is-transient-storage-its-applications-and-security-considerations?ref=localhost" rel="noopener ugc nofollow"><strong>here</strong></a><strong>.</strong></p><hr><h3 id="resources"><strong>Resources:</strong></h3><h3 id="eip-1153-transient-storage-opcodes"><a href="https://eips.ethereum.org/EIPS/eip-1153?source=post_page-----6f72f61739c4--------------------------------" rel="noreferrer">EIP-1153: Transient storage opcodes</a><br></h3><h3 id="transient-storage-opcodes-in-solidity-0824"><a href="https://soliditylang.org/blog/2024/01/26/transient-storage/?source=post_page-----6f72f61739c4--------------------------------" rel="noreferrer">Transient Storage Opcodes in Solidity 0.8.24</a><br></h3><h3 id="what-is-transient-storage-its-applications-and-security-considerations"><a href="https://dev-otion.com/en/entry/what-is-transient-storage-its-applications-and-security-considerations?source=post_page-----6f72f61739c4--------------------------------" rel="noreferrer">What is transient storage? It&apos;s applications and security considerations</a><br></h3><h3 id="tstore-low-gas-reentrancy"><a href="https://chainsecurity.com/tstore-low-gas-reentrancy/?source=post_page-----6f72f61739c4--------------------------------" rel="noreferrer">TSTORE Low Gas Reentrancy</a></h3>]]></content:encoded></item></channel></rss>
